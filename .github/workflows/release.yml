@@ -112,6 +112,38 @@ jobs:
           compression-level: 9
           path: dist/pumpkin-*
 
+  build_armv7_release:
+    name: Build project in release for ARMv7 (32-bit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - run: rustup update stable && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-zigbuild
+        run: pip3 install --break-system-packages cargo-zigbuild
+
+      - name: Build Release (ARMv7)
+        run: |
+          rustup target add armv7-unknown-linux-musleabihf
+          cargo zigbuild --release --target armv7-unknown-linux-musleabihf
+
+      - name: Prepare artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/armv7-unknown-linux-musleabihf/release/pumpkin" "dist/pumpkin-ARMv7-Linux-musl"
+
+      - name: Export executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: pumpkin-ARMv7-Linux
+          compression-level: 9
+          path: dist/pumpkin-ARMv7-Linux-musl
+
   build_android_release:
     name: Build project in release for Android (AArch64)
     runs-on: ubuntu-latest
@@ -148,7 +180,7 @@ jobs:
     name: Publish GitHub Release
     permissions:
       contents: write
-    needs: [build_release, build_android_release]
+    needs: [build_release, build_armv7_release, build_android_release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
