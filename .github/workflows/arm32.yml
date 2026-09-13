@@ -1,0 +1,96 @@
+name: ARM32
+
+on:
+  push:
+    tags:
+      - "*"
+      - "!nightly"
+      - "!nightly*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release Tag name (optional, defaults to Cargo.toml version)"
+        required: false
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
+
+permissions:
+  contents: write
+
+jobs:
+  build_armv7:
+    name: Build & Publish ARMv7 (normal + static)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - run: rustup update stable && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf
+          pip3 install --break-system-packages cargo-zigbuild
+
+      - name: Add ARMv7 targets
+        run: |
+          rustup target add armv7-unknown-linux-gnueabihf
+          rustup target add armv7-unknown-linux-musleabihf
+
+      - name: Build Release (ARMv7 static musl)
+        run: cargo zigbuild --release --target armv7-unknown-linux-musleabihf
+
+      - name: Build Release (ARMv7 normal glibc)
+        env:
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
+        run: cargo build --release --target armv7-unknown-linux-gnueabihf
+
+      - name: Prepare artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/armv7-unknown-linux-gnueabihf/release/pumpkin" "dist/pumpkin-ARMv7-Linux"
+          cp "target/armv7-unknown-linux-musleabihf/release/pumpkin" "dist/pumpkin-ARMv7-Linux-musl"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: pumpkin-armv7-linux
+          compression-level: 9
+          path: dist/pumpkin-*
+
+      - name: Determine tag name
+        id: tag
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          elif [ "${{ github.ref_type }}" == "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            VERSION=$(awk -F '"' '/^version/ {print $2}' Cargo.toml)
+            TAG="${VERSION}"
+          fi
+          echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
+          echo "Determined release tag: ${TAG}"
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum pumpkin-* > arm32-checksums.sha256
+          cat arm32-checksums.sha256
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.tag_name }}
+          files: |
+            dist/pumpkin*
+            dist/arm32-checksums.sha256
